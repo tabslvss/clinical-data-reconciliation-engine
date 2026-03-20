@@ -1,10 +1,22 @@
 """
 Rule-based data quality scoring engine.
 Scores are deterministic; AI is called afterwards for deeper insights.
+
+PyHealth integration:
+  score_quality_from_patient() accepts a pyhealth.data.Patient that was
+  built by pyhealth_adapter.build_quality_patient().  It extracts the
+  Event objects, reconstructs the DataQualityRequest Pydantic model, and
+  delegates to score_data_quality() so all scoring rules run unchanged.
 """
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
 from app.models.data_quality import DataQualityRequest, QualityIssue
+
+if TYPE_CHECKING:
+    from pyhealth.data import Patient
 
 
 def _parse_bp(bp_str: Optional[str]) -> tuple[Optional[int], Optional[int]]:
@@ -253,3 +265,24 @@ def score_data_quality(record: DataQualityRequest) -> dict:
         },
         "issues_detected": [i.model_dump() for i in all_issues],
     }
+
+
+# ─────────────────────────────────────────────────────────────
+# PyHealth entry point
+# ─────────────────────────────────────────────────────────────
+
+def score_quality_from_patient(patient: "Patient") -> dict:
+    """
+    Score data quality directly from a pyhealth.data.Patient.
+
+    The Patient must have been built with
+    ``pyhealth_adapter.build_quality_patient()``.  This function
+    extracts the structured Event objects (medication, diagnosis,
+    allergy, vital_sign, demographic, record_meta), reconstructs a
+    DataQualityRequest, and delegates to score_data_quality() so
+    every scoring dimension runs unchanged.
+    """
+    from app.services.pyhealth_adapter import extract_quality_request
+
+    record = extract_quality_request(patient)
+    return score_data_quality(record)

@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
+
 from app.models.medication import MedicationReconcileRequest, MedicationReconcileResponse
-from app.services.reconciliation_engine import reconcile_medications, build_conflict_summary
+from app.services.pyhealth_adapter import build_reconcile_patient
+from app.services.reconciliation_engine import reconcile_from_patient, build_conflict_summary
 from app.services.ai_service import get_reconciliation_reasoning
 from app.utils.auth import get_api_key
 
@@ -15,19 +17,18 @@ async def reconcile_medication(
     if not payload.sources:
         raise HTTPException(status_code=422, detail="At least one medication source is required.")
 
-    best_source, confidence, scores = reconcile_medications(
-        payload.sources, payload.patient_context
-    )
+    # Convert the request to a pyhealth Patient (polars-backed Event store)
+    patient = build_reconcile_patient(payload)
+
+    # Run rule-based reconciliation through the PyHealth patient
+    best_source, confidence, _scores = reconcile_from_patient(patient)
 
     conflict_summary = build_conflict_summary(payload.sources)
 
-    all_sources_dict = [s.model_dump() for s in payload.sources]
-    context_dict = payload.patient_context.model_dump()
-
     ai_result = get_reconciliation_reasoning(
         reconciled_medication=best_source.medication,
-        all_sources=all_sources_dict,
-        patient_context=context_dict,
+        all_sources=[s.model_dump() for s in payload.sources],
+        patient_context=payload.patient_context.model_dump(),
         confidence_score=confidence,
     )
 

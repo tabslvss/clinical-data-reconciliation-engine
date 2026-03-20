@@ -2,10 +2,22 @@
 Rule-based reconciliation engine.
 This layer deterministically picks the best source BEFORE any AI call.
 AI is only used afterwards to generate human-readable reasoning.
+
+PyHealth integration:
+  reconcile_from_patient() accepts a pyhealth.data.Patient that was built
+  by pyhealth_adapter.build_reconcile_patient().  It extracts the Event
+  objects, reconstructs the Pydantic models, and delegates to the core
+  reconcile_medications() logic so all business rules run unchanged.
 """
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
 from app.models.medication import MedicationSource, PatientContext
+
+if TYPE_CHECKING:
+    from pyhealth.data import Patient
 
 RELIABILITY_SCORE = {"high": 3, "medium": 2, "low": 1}
 
@@ -105,3 +117,27 @@ def reconcile_medications(
 def build_conflict_summary(sources: list[MedicationSource]) -> str:
     lines = [f"- {s.system}: {s.medication} (reliability: {s.source_reliability})" for s in sources]
     return "\n".join(lines)
+
+
+# ─────────────────────────────────────────────────────────────
+# PyHealth entry point
+# ─────────────────────────────────────────────────────────────
+
+def reconcile_from_patient(
+    patient: "Patient",
+) -> tuple[MedicationSource, float, list[float]]:
+    """
+    Run medication reconciliation directly from a pyhealth.data.Patient.
+
+    The Patient must have been built with
+    ``pyhealth_adapter.build_reconcile_patient()``.  This function
+    extracts the structured Event objects, reconstructs the domain
+    Pydantic models, and delegates to the core reconcile_medications()
+    function so every business rule is exercised on standardised data.
+
+    Returns (best_source, confidence_score, all_scores).
+    """
+    from app.services.pyhealth_adapter import extract_reconcile_models
+
+    sources, context = extract_reconcile_models(patient)
+    return reconcile_medications(sources, context)
