@@ -1,0 +1,8 @@
+{
+  "demographics": { "name": "John Doe", "dob": "1955-03-15", "gender": "M" },
+  "medications": ["Metformin 500mg", "Lisinopril 10mg"],
+  "allergies": [],
+  "conditions": ["Type 2 Diabetes"],
+  "vital_signs": { "blood_pressure": "340/180", "heart_rate": 72 },
+  "last_updated": "2024-06-15"
+}

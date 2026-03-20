@@ -1,0 +1,8 @@
+{
+  "demographics": { "name": "Alice Smith", "dob": "1962-11-20", "gender": "F" },
+  "medications": ["Metformin 500mg twice daily", "Lisinopril 10mg daily", "Atorvastatin 40mg"],
+  "allergies": ["Penicillin", "Sulfa drugs"],
+  "conditions": ["Type 2 Diabetes", "Hypertension", "Hyperlipidemia"],
+  "vital_signs": { "blood_pressure": "132/84", "heart_rate": 76, "oxygen_saturation": 98 },
+  "last_updated": "2025-02-20"
+}

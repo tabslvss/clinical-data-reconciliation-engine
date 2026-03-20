@@ -1,0 +1,27 @@
+{
+  "patient_context": {
+    "age": 55,
+    "conditions": ["Hypertension", "Heart Failure"],
+    "recent_labs": {}
+  },
+  "sources": [
+    {
+      "system": "Cardiology Clinic",
+      "medication": "Lisinopril 20mg daily",
+      "last_updated": "2025-02-10",
+      "source_reliability": "high"
+    },
+    {
+      "system": "Patient Portal",
+      "medication": "Lisinopril 10mg daily",
+      "last_updated": "2024-08-01",
+      "source_reliability": "low"
+    },
+    {
+      "system": "Pharmacy",
+      "medication": "Lisinopril 20mg daily",
+      "last_filled": "2025-02-12",
+      "source_reliability": "medium"
+    }
+  ]
+}
