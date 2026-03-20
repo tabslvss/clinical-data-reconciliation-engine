@@ -4,17 +4,149 @@ A full-stack application that resolves conflicting medication records across EHR
 
 ---
 
+## Quick Start — Run in 5 Minutes
+
+> **Copy these commands exactly.** Everything below assumes you are in the root `Project/` folder.
+
+### Step 1 — Clone / open the project
+
+```bash
+# Already done if you're reading this locally.
+# Otherwise:
+git clone https://github.com/tabslvss/clinical-data-reconciliation-engine.git
+cd clinical-data-reconciliation-engine
+```
+
+---
+
+### Step 2 — Set up the Backend
+
+```bash
+cd backend
+
+# Create and activate a virtual environment
+python -m venv venv
+
+# Windows (PowerShell)
+.\venv\Scripts\Activate.ps1
+
+# macOS / Linux
+source venv/bin/activate
+
+# Install all dependencies (includes FastAPI, PyHealth, OpenAI, etc.)
+pip install -r requirements.txt
+```
+
+**Create your `.env` file:**
+
+```bash
+# Windows
+copy .env.example .env
+
+# macOS / Linux
+cp .env.example .env
+```
+
+Open `backend/.env` and fill in the two keys:
+
+```env
+OPENAI_API_KEY=sk-...        ← Your OpenAI key (get one at platform.openai.com/api-keys)
+API_KEY=any-password-you-choose   ← A secret you invent — must match VITE_API_KEY below
+```
+
+> **No OpenAI key?** The app still works. The backend falls back to rule-based reasoning; AI narrative explanations just won't appear.
+
+**Start the backend server:**
+
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+
+Backend is now running at **`http://localhost:8000`**
+
+---
+
+### Step 3 — Set up the Frontend
+
+Open a **second terminal** (keep the backend running).
+
+```bash
+cd frontend
+
+# Windows
+copy .env.example .env
+
+# macOS / Linux
+cp .env.example .env
+```
+
+Open `frontend/.env` and fill in:
+
+```env
+VITE_API_URL=http://localhost:8000
+VITE_API_KEY=any-password-you-choose   ← Must be the EXACT same value as API_KEY in backend/.env
+```
+
+**Install dependencies and start the dev server:**
+
+```bash
+npm install
+npm run dev
+```
+
+Frontend is now running at **`http://localhost:5173`**  
+Open that URL in your browser — you're done.
+
+---
+
+### Step 4 — What keys do I need and where?
+
+| Key | File | What it is |
+|-----|------|-----------|
+| `OPENAI_API_KEY` | `backend/.env` | Your OpenAI secret key — never share this. Get it at [platform.openai.com/api-keys](https://platform.openai.com/api-keys). Optional — app works without it. |
+| `API_KEY` | `backend/.env` | Any password you invent (e.g., `my-dev-key-123`). The backend checks every incoming request against this. |
+| `VITE_API_KEY` | `frontend/.env` | Must be the **same value** as `API_KEY` above. The frontend sends this as an `x-api-key` header on every API call. |
+| `VITE_API_URL` | `frontend/.env` | The URL of your backend. Leave as `http://localhost:8000` for local development. |
+
+> **Why does the frontend need an API key?**  
+> To prevent anyone from hitting your backend API without authorization. The key is sent in the `x-api-key` request header. It has nothing to do with OpenAI.
+
+---
+
+### Step 5 — API & Interactive Documentation
+
+Once the backend is running, open these URLs in your browser:
+
+| URL | What you'll see |
+|-----|----------------|
+| `http://localhost:8000/docs` | **Swagger UI** — test every endpoint live, see request/response schemas |
+| `http://localhost:8000/redoc` | **ReDoc** — clean reference documentation |
+| `http://localhost:8000/openapi.json` | Raw OpenAPI JSON schema |
+
+---
+
+### Step 6 — Run the Tests
+
+```bash
+cd backend
+
+# Activate the venv first (if not already active)
+.\venv\Scripts\Activate.ps1   # Windows
+source venv/bin/activate       # macOS / Linux
+
+pytest tests/ -v
+```
+
+Expected output: **10 passed** ✓
+
+---
+
 ## Table of Contents
 
 - [Overview](#overview)
 - [Architecture](#architecture)
 - [Tech Stack](#tech-stack)
-- [Getting Started](#getting-started)
-  - [Prerequisites](#prerequisites)
-  - [Backend Setup](#backend-setup)
-  - [Frontend Setup](#frontend-setup)
 - [API Reference](#api-reference)
-- [Running Tests](#running-tests)
 - [LLM Choice & Prompt Engineering](#llm-choice--prompt-engineering)
 - [Key Design Decisions](#key-design-decisions)
 - [Trade-offs](#trade-offs)
@@ -46,6 +178,15 @@ Frontend (React + Vite)
     │  POST /api/validate/data-quality
     │
 Backend (FastAPI)
+    ├── Input Sanitization (Pydantic v2 validators)
+    │     ├── Strip whitespace, enforce length limits
+    │     ├── Date format validation
+    │     └── Range checks (age, vitals, list sizes)
+    │
+    ├── PyHealth Adapter
+    │     ├── Converts requests → pyhealth.data.Patient + Event objects
+    │     └── Converts Event objects back → Pydantic models
+    │
     ├── Rule Engine        ← deterministic logic runs FIRST
     │     ├── Recency scoring (newer sources weighted higher)
     │     ├── Reliability weighting (high/medium/low)
@@ -72,81 +213,16 @@ Backend (FastAPI)
 | Backend   | FastAPI (Python)       | Automatic docs, Pydantic validation, fast async support     |
 | Frontend  | React 19 + Vite        | Fast HMR, clean component model, recruiter-familiar         |
 | AI        | OpenAI GPT-4o-mini     | Best balance of cost, speed, and clinical reasoning quality |
+| Data      | PyHealth 2.0 + Polars  | Standardised `Patient`/`Event` EHR data structures          |
 | Auth      | API key header         | Simple, stateless, meets the brief requirement              |
 | Storage   | In-memory (dict)       | No DB needed; cache lives in process memory                 |
 | Tests     | pytest                 | Fast, readable, standard Python testing                     |
 
 ---
 
-## Getting Started
-
-### Prerequisites
-
-- Python 3.11+
-- Node.js 18+
-- An OpenAI API key ([platform.openai.com](https://platform.openai.com))
-
----
-
-### Backend Setup
-
-```bash
-cd backend
-
-# Create and activate a virtual environment
-python -m venv venv
-
-# Windows
-venv\Scripts\activate
-
-# macOS/Linux
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Set up environment variables
-copy .env.example .env      # Windows
-cp .env.example .env        # macOS/Linux
-
-# Edit .env and add your keys:
-# OPENAI_API_KEY=sk-...
-# API_KEY=dev-secret-key
-
-# Start the API server
-uvicorn app.main:app --reload --port 8000
-```
-
-The API will be available at `http://localhost:8000`  
-Interactive docs: `http://localhost:8000/docs`
-
----
-
-### Frontend Setup
-
-```bash
-cd frontend
-
-# Copy environment file
-copy .env.example .env      # Windows
-cp .env.example .env        # macOS/Linux
-
-# Install dependencies
-npm install
-
-# Start the dev server
-npm run dev
-```
-
-The frontend will be available at `http://localhost:5173`
-
-> **Note:** If you don't have an OpenAI key, the app still works — the backend falls back to rule-based reasoning with a `WARNING` safety status.
-
----
-
 ## API Reference
 
-All endpoints require the `x-api-key` header.
+All endpoints require the `x-api-key` header matching your `API_KEY` env var.
 
 ### `POST /api/reconcile/medication`
 
@@ -231,36 +307,6 @@ Scores a patient record across four quality dimensions.
 
 ---
 
-## Running Tests
-
-```bash
-cd backend
-
-# Activate your virtual environment first
-venv\Scripts\activate   # Windows
-source venv/bin/activate  # macOS/Linux
-
-# Run all tests with verbose output
-pytest tests/ -v
-```
-
-**Test coverage (10 tests across 2 files):**
-
-| # | Test | What it verifies |
-|---|------|-----------------|
-| 1 | `test_most_recent_source_wins` | Recency scoring selects newer records |
-| 2 | `test_high_reliability_beats_low` | Reliability weighting works correctly |
-| 3 | `test_low_egfr_penalises_high_dose_metformin` | Clinical adjustment for kidney function |
-| 4 | `test_no_date_gets_zero_recency` | Edge case: missing date handling |
-| 5 | `test_source_agreement_boosts_confidence` | Agreement bonus logic |
-| 6 | `test_impossible_blood_pressure_flagged` | Physiologically impossible vitals caught |
-| 7 | `test_missing_allergies_lowers_completeness` | Incomplete allergy field detected |
-| 8 | `test_old_data_lowers_timeliness` | Timeliness scoring |
-| 9 | `test_diabetes_without_medication_flagged` | Drug-disease mismatch detection |
-| 10 | `test_perfect_record_scores_high` | High-quality record gets good score |
-
----
-
 ## LLM Choice & Prompt Engineering
 
 **Model:** OpenAI `gpt-4o-mini`
@@ -300,17 +346,20 @@ The LLM only generates narrative reasoning for the answer the rules already sele
 - Clinical safety is never AI-dependent
 - The system works even without an API key
 
-### 2. Confidence Score is Deterministic
+### 2. PyHealth Data Structures
+All clinical data is converted into `pyhealth.data.Patient` and `Event` objects before processing. This means the engine operates on standardised EHR data structures rather than raw dicts, making it compatible with the broader PyHealth ML ecosystem.
+
+### 3. Confidence Score is Deterministic
 Confidence is calculated mathematically from the scoring components — not asked of the AI. This makes it reliable and auditable. An AI-reported "88% confidence" would be meaningless; a score derived from source recency + reliability + agreement is meaningful.
 
-### 3. In-Memory Cache
+### 4. In-Memory Cache
 All AI responses are cached by SHA-256 hash of the request payload. For a take-home, this avoids burning API credits during development. In production, this would be Redis with a TTL.
 
-### 4. Pydantic Validation Throughout
-Every request and response is fully typed with Pydantic v2. Invalid inputs get descriptive 422 errors automatically — no manual validation code needed.
+### 5. Pydantic Validation + Sanitization Throughout
+Every request is validated and sanitized: whitespace stripped, lengths capped, date formats enforced, numeric ranges clamped. Invalid inputs get descriptive 422 errors automatically.
 
-### 5. CORS configured for local dev
-The backend allows requests from `localhost:5173` (Vite dev server) and `localhost:3000` by default. Easily changed for production via environment variable.
+### 6. CORS configured for local dev
+The backend allows requests from `localhost:5173` (Vite dev server) and `localhost:3000` by default.
 
 ---
 
@@ -349,7 +398,9 @@ The backend allows requests from `localhost:5173` (Vite dev server) and `localho
 | Backend API + models + auth | ~2 hours |
 | Rule engine + data quality engine | ~2.5 hours |
 | AI service + prompt engineering + caching | ~1.5 hours |
+| PyHealth integration | ~1 hour |
+| Input sanitization | ~0.5 hours |
 | Unit tests | ~1 hour |
 | Frontend (React + UI components) | ~2.5 hours |
 | README + documentation | ~1 hour |
-| **Total** | **~11.5 hours** |
+| **Total** | **~13 hours** |
