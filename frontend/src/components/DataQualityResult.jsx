@@ -1,12 +1,4 @@
-import ScoreRing from "./ScoreRing";
-
-const SEVERITY_TAG = {
-  high: "tag-red",
-  medium: "tag-yellow",
-  low: "tag-blue",
-};
-
-const BREAKDOWN_LABELS = {
+const DIMS = {
   completeness: "Completeness",
   accuracy: "Accuracy",
   timeliness: "Timeliness",
@@ -14,42 +6,78 @@ const BREAKDOWN_LABELS = {
 };
 
 function scoreColor(s) {
-  return s >= 75 ? "var(--green)" : s >= 50 ? "var(--yellow)" : "var(--red)";
+  if (s >= 75) return "#16a34a";
+  if (s >= 50) return "#d97706";
+  return "#ef4444";
 }
 
-export default function DataQualityResult({ result }) {
-  return (
-    <div className="card" style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
-      <div className="card-title">Data Quality Report</div>
+function ScoreRing({ score }) {
+  const r = 38, stroke = 6;
+  const circ = 2 * Math.PI * r;
+  const offset = circ - (score / 100) * circ;
+  const color = scoreColor(score);
 
-      {/* Overall score ring */}
+  return (
+    <svg width="96" height="96" style={{ flexShrink: 0, overflow: "visible" }}>
+      <circle cx="48" cy="48" r={r} fill="none" stroke="var(--surface2)" strokeWidth={stroke} />
+      <circle
+        cx="48" cy="48" r={r} fill="none"
+        stroke={color} strokeWidth={stroke}
+        strokeDasharray={circ}
+        strokeDashoffset={offset}
+        strokeLinecap="round"
+        transform="rotate(-90 48 48)"
+        style={{ animation: "ringDraw 0.9s cubic-bezier(0.4,0,0.2,1) both" }}
+      />
+      <text x="48" y="44" textAnchor="middle" fill={color} fontSize="20" fontWeight="900" fontFamily="Inter,sans-serif">{score}</text>
+      <text x="48" y="60" textAnchor="middle" fill="var(--text-muted)" fontSize="11" fontWeight="500" fontFamily="Inter,sans-serif">/100</text>
+    </svg>
+  );
+}
+
+const SEV_CLASS = { high: "badge-red", medium: "badge-yellow", low: "badge-gray" };
+
+export default function DataQualityResult({ result }) {
+  const color = scoreColor(result.overall_score);
+  const label = result.overall_score >= 75 ? "Good Quality" : result.overall_score >= 50 ? "Needs Attention" : "Poor Quality";
+
+  return (
+    <div className="result-card" style={{ display: "flex", flexDirection: "column" }}>
+
+      {/* Score header */}
       <div className="score-ring-wrap">
         <ScoreRing score={result.overall_score} />
-        <div>
-          <div style={{ fontSize: "15px", fontWeight: 700 }}>
-            {result.overall_score >= 75 ? "Good quality" : result.overall_score >= 50 ? "Needs attention" : "Poor quality"}
-          </div>
-          <div style={{ color: "var(--text-muted)", fontSize: "13px" }}>
+        <div className="score-ring-text">
+          <div className="score-ring-status" style={{ color }}>{label}</div>
+          <div style={{ fontSize: "14px", color: "var(--text-secondary)" }}>Overall quality score</div>
+          <div style={{ fontSize: "13px", color: "var(--text-muted)", marginTop: "4px" }}>
             {result.issues_detected.length} issue{result.issues_detected.length !== 1 ? "s" : ""} detected
           </div>
         </div>
       </div>
 
-      {/* Breakdown grid */}
-      <div className="breakdown-grid">
-        {Object.entries(result.breakdown).map(([key, val]) => (
-          <div className="breakdown-item" key={key}>
-            <div className="breakdown-item-label">{BREAKDOWN_LABELS[key] || key}</div>
-            <div className="breakdown-item-score" style={{ color: scoreColor(val) }}>{val}</div>
-          </div>
-        ))}
+      {/* Dimension breakdown */}
+      <div className="section-label">Score Breakdown</div>
+      <div className="dim-grid" style={{ marginBottom: "22px" }}>
+        {Object.entries(result.breakdown).map(([key, val], i) => {
+          const c = scoreColor(val);
+          return (
+            <div className="dim-card" key={key} style={{ animationDelay: `${i * 60}ms` }}>
+              <div className="dim-label">{DIMS[key] || key}</div>
+              <div className="dim-score" style={{ color: c }}>{val}</div>
+              <div className="dim-bar">
+                <div className="dim-bar-fill" style={{ width: `${val}%`, background: c, animationDelay: `${i * 80}ms` }} />
+              </div>
+            </div>
+          );
+        })}
       </div>
 
-      {/* Issues table */}
+      {/* Issues */}
       {result.issues_detected.length > 0 && (
-        <div>
-          <div className="label">Issues Detected</div>
-          <table className="issues-table">
+        <>
+          <div className="section-label">Issues Detected</div>
+          <table className="issues-table" style={{ marginBottom: "16px" }}>
             <thead>
               <tr>
                 <th>Field</th>
@@ -60,25 +88,21 @@ export default function DataQualityResult({ result }) {
             <tbody>
               {result.issues_detected.map((issue, i) => (
                 <tr key={i}>
-                  <td style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }}>{issue.field}</td>
-                  <td>{issue.issue}</td>
-                  <td>
-                    <span className={`tag ${SEVERITY_TAG[issue.severity] || "tag-blue"}`}>
-                      {issue.severity}
-                    </span>
-                  </td>
+                  <td><span className="field-code">{issue.field}</span></td>
+                  <td style={{ color: "var(--text-secondary)" }}>{issue.issue}</td>
+                  <td><span className={`badge ${SEV_CLASS[issue.severity] || "badge-gray"}`}>{issue.severity}</span></td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
+        </>
       )}
 
       {/* AI insights */}
       {result.ai_insights && (
-        <div>
-          <div className="label">AI Insights</div>
-          <div className="reasoning-block">{result.ai_insights}</div>
+        <div className="ai-insights">
+          <span className="ai-insights-icon">✦</span>
+          <span>{result.ai_insights}</span>
         </div>
       )}
     </div>
