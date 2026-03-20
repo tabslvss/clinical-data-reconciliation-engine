@@ -55,7 +55,7 @@
 @media (max-width: 768px) { .main { padding: 28px 20px 60px; } }
 
 /* ── Page header ─────────────────────────────────────────────── */
-.page-header { margin-bottom: 36px; animation: fadeInUp 0.4s ease both; }
+.page-header { margin-bottom: 36px; animation: fadeInUp 0.4s ease both; position: relative; z-index: 1; }
 .page-title {
   font-size: 30px;
   font-weight: 800;
