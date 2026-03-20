@@ -1,22 +1,64 @@
 import { useState } from "react";
 import { validateDataQuality } from "../services/api";
 import TagInput from "../components/TagInput";
+import MedicationEntry, { makeMed } from "../components/MedicationEntry";
 import DataQualityResult from "../components/DataQualityResult";
 
-const MED_SUGGESTIONS = [
-  "Metformin 500mg", "Metformin 1000mg", "Lisinopril 10mg", "Lisinopril 20mg",
-  "Atorvastatin 40mg", "Aspirin 81mg", "Aspirin 325mg", "Amlodipine 5mg",
-  "Metoprolol 50mg", "Omeprazole 20mg", "Levothyroxine 50mcg", "Insulin Glargine",
-];
-const CONDITION_SUGGESTIONS = [
-  "Type 2 Diabetes", "Type 1 Diabetes", "Hypertension", "Heart Failure",
-  "Atrial Fibrillation", "CKD", "COPD", "Asthma", "Hyperlipidemia",
-  "Hypothyroidism", "Depression", "GERD", "CAD",
-];
 const ALLERGY_SUGGESTIONS = [
   "Penicillin", "Sulfa drugs", "Aspirin", "NSAIDs", "Codeine",
   "Latex", "Shellfish", "Contrast dye", "Cephalosporins",
 ];
+
+// ── Autofill datasets ────────────────────────────────────────────
+const TEST_DATASETS = [
+  {
+    label: "Poor quality record",
+    data: {
+      name: "John Doe", dob: "1955-03-15", gender: "M",
+      medications: [
+        { name: "Metformin", amount: "500", unit: "mg" },
+        { name: "Lisinopril", amount: "10", unit: "mg" },
+      ],
+      allergies: [],
+      conditions: ["Type 2 Diabetes"],
+      bp: "340/180", hr: "72",
+      last_updated: "2024-06-15",
+    },
+  },
+  {
+    label: "High quality record",
+    data: {
+      name: "Alice Smith", dob: "1962-11-20", gender: "F",
+      medications: [
+        { name: "Metformin", amount: "500", unit: "mg" },
+        { name: "Lisinopril", amount: "10", unit: "mg" },
+        { name: "Atorvastatin", amount: "40", unit: "mg" },
+      ],
+      allergies: ["Penicillin", "Sulfa drugs"],
+      conditions: ["Type 2 Diabetes", "Hypertension", "Hyperlipidemia"],
+      bp: "132/84", hr: "76",
+      last_updated: new Date().toISOString().split("T")[0],
+    },
+  },
+  {
+    label: "Missing data record",
+    data: {
+      name: "", dob: "", gender: "",
+      medications: [],
+      allergies: [],
+      conditions: [],
+      bp: "", hr: "",
+      last_updated: "2022-03-01",
+    },
+  },
+];
+
+function medsToString(meds) {
+  return meds
+    .filter(m => m.name.trim())
+    .map(m => `${m.name.trim()}${m.amount ? " " + m.amount + m.unit : ""}`)
+    .filter(Boolean);
+}
 
 function buildPayload(form) {
   return {
@@ -25,8 +67,8 @@ function buildPayload(form) {
       dob: form.dob || undefined,
       gender: form.gender || undefined,
     },
-    medications: form.medications.length ? form.medications : undefined,
-    allergies: form.allergies.length ? form.allergies : [],
+    medications: medsToString(form.medications),
+    allergies: form.allergies,
     conditions: form.conditions.length ? form.conditions : undefined,
     vital_signs: buildVitals(form),
     last_updated: form.last_updated || undefined,
@@ -37,9 +79,6 @@ function buildVitals(form) {
   const v = {};
   if (form.bp) v.blood_pressure = form.bp;
   if (form.hr) v.heart_rate = parseInt(form.hr);
-  if (form.spo2) v.oxygen_saturation = parseFloat(form.spo2);
-  if (form.temp) v.temperature = parseFloat(form.temp);
-  if (form.rr) v.respiratory_rate = parseInt(form.rr);
   return Object.keys(v).length ? v : undefined;
 }
 
@@ -49,22 +88,14 @@ function validate(form) {
 
   if (form.dob) {
     const parsed = new Date(form.dob);
-    if (isNaN(parsed.getTime())) { errs.dob = "Invalid date format"; ok = false; }
+    if (isNaN(parsed.getTime())) { errs.dob = "Invalid date"; ok = false; }
   }
   if (form.bp && !/^\d{2,3}\/\d{2,3}$/.test(form.bp.replace(/\s/g, ""))) {
-    errs.bp = "Format: systolic/diastolic (e.g. 120/80)";
+    errs.bp = "Format: 120/80";
     ok = false;
   }
   if (form.hr && (isNaN(parseInt(form.hr)) || parseInt(form.hr) < 10 || parseInt(form.hr) > 300)) {
     errs.hr = "Enter 10–300 bpm";
-    ok = false;
-  }
-  if (form.spo2 && (isNaN(parseFloat(form.spo2)) || parseFloat(form.spo2) < 50 || parseFloat(form.spo2) > 100)) {
-    errs.spo2 = "Enter 50–100%";
-    ok = false;
-  }
-  if (form.temp && (isNaN(parseFloat(form.temp)) || parseFloat(form.temp) < 30 || parseFloat(form.temp) > 45)) {
-    errs.temp = "Enter 30–45 °C";
     ok = false;
   }
   return { ok, errs };
@@ -72,8 +103,9 @@ function validate(form) {
 
 const EMPTY_FORM = {
   name: "", dob: "", gender: "",
-  medications: [], allergies: [], conditions: [],
-  bp: "", hr: "", spo2: "", temp: "", rr: "",
+  medications: [],
+  allergies: [], conditions: [],
+  bp: "", hr: "",
   last_updated: "",
 };
 
@@ -83,8 +115,17 @@ export default function ValidatePage() {
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState(null);
   const [errors, setErrors] = useState({});
+  const [autofillOpen, setAutofillOpen] = useState(false);
 
   function setField(k, v) { setForm(f => ({ ...f, [k]: v })); }
+
+  function applyAutofill(dataset) {
+    setForm(dataset.data);
+    setResult(null);
+    setErrors({});
+    setApiError(null);
+    setAutofillOpen(false);
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -108,18 +149,61 @@ export default function ValidatePage() {
     }
   }
 
-  function handleReset() {
-    setForm(EMPTY_FORM);
-    setResult(null);
-    setErrors({});
-    setApiError(null);
-  }
-
   return (
     <div style={{ animation: "fadeInUp 0.4s ease both" }}>
       <div className="page-header">
-        <h1 className="page-title">Data Quality Validator</h1>
-        <p className="page-subtitle">Score a patient record across completeness, accuracy, timeliness, and clinical plausibility.</p>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "16px", flexWrap: "wrap" }}>
+          <div>
+            <h1 className="page-title">Data Quality Validator</h1>
+            <p className="page-subtitle">Score a patient record across completeness, accuracy, timeliness, and clinical plausibility.</p>
+          </div>
+          {/* Autofill dropdown */}
+          <div style={{ position: "relative", flexShrink: 0 }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setAutofillOpen(v => !v)}
+              style={{ gap: "7px", whiteSpace: "nowrap" }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+              </svg>
+              Autofill Test Data
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
+            {autofillOpen && (
+              <div style={{
+                position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 50,
+                background: "var(--bg)", border: "1.5px solid var(--border)",
+                borderRadius: "var(--radius-sm)", boxShadow: "var(--shadow-lg)",
+                minWidth: "220px", overflow: "hidden",
+                animation: "scaleIn 0.15s ease",
+              }}>
+                {TEST_DATASETS.map((ds, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => applyAutofill(ds)}
+                    style={{
+                      display: "block", width: "100%", padding: "11px 16px",
+                      background: "none", border: "none",
+                      textAlign: "left", fontSize: "13.5px", fontWeight: 500,
+                      color: "var(--text)", cursor: "pointer",
+                      borderBottom: i < TEST_DATASETS.length - 1 ? "1px solid var(--border)" : "none",
+                      transition: "background var(--transition)",
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = "var(--surface)"}
+                    onMouseLeave={e => e.currentTarget.style.background = "none"}
+                  >
+                    {ds.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       <form onSubmit={handleSubmit} noValidate>
@@ -139,7 +223,11 @@ export default function ValidatePage() {
                 <div className="form-grid-2">
                   <div className="field">
                     <label className="field-label">Date of Birth</label>
-                    <input type="date" value={form.dob} onChange={e => setField("dob", e.target.value)} className={errors.dob ? "error" : ""} />
+                    <input
+                      type="date" value={form.dob}
+                      onChange={e => setField("dob", e.target.value)}
+                      className={errors.dob ? "error" : ""}
+                    />
                     {errors.dob && <span className="field-error">{errors.dob}</span>}
                   </div>
                   <div className="field">
@@ -156,19 +244,18 @@ export default function ValidatePage() {
               </div>
             </div>
 
-            {/* Clinical Data */}
-            <div className="card" style={{ animation: "fadeInUp 0.4s ease 0.1s both" }}>
-              <div className="section-label">Clinical Data</div>
+            {/* Medications */}
+            <div className="card" style={{ animation: "fadeInUp 0.4s ease 0.08s both" }}>
+              <div className="section-label">Current Medications</div>
+              <MedicationEntry
+                value={form.medications}
+                onChange={v => setField("medications", v)}
+              />
+            </div>
+
+            {/* Allergies + Conditions */}
+            <div className="card" style={{ animation: "fadeInUp 0.4s ease 0.11s both" }}>
               <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
-                <div className="field">
-                  <label className="field-label">Current Medications</label>
-                  <TagInput
-                    value={form.medications}
-                    onChange={v => setField("medications", v)}
-                    placeholder="e.g. Metformin 500mg, Lisinopril 10mg"
-                    suggestions={MED_SUGGESTIONS}
-                  />
-                </div>
                 <div className="field">
                   <label className="field-label">Known Allergies</label>
                   <TagInput
@@ -177,7 +264,7 @@ export default function ValidatePage() {
                     placeholder="e.g. Penicillin, Sulfa drugs"
                     suggestions={ALLERGY_SUGGESTIONS}
                   />
-                  <span className="field-hint">Leave empty if no known allergies (will flag as potentially incomplete)</span>
+                  <span className="field-hint">Leave empty if none — will flag as potentially incomplete</span>
                 </div>
                 <div className="field">
                   <label className="field-label">Diagnoses / Conditions</label>
@@ -185,71 +272,51 @@ export default function ValidatePage() {
                     value={form.conditions}
                     onChange={v => setField("conditions", v)}
                     placeholder="e.g. Type 2 Diabetes, Hypertension"
-                    suggestions={CONDITION_SUGGESTIONS}
                   />
                 </div>
               </div>
             </div>
 
-            {/* Vital Signs */}
-            <div className="card" style={{ animation: "fadeInUp 0.4s ease 0.15s both" }}>
-              <div className="section-label">Vital Signs <span style={{ textTransform: "none", fontSize: "11px", fontWeight: 400 }}>(optional)</span></div>
-              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                <div className="form-grid-2">
-                  <div className="field">
-                    <label className="field-label">Blood Pressure</label>
-                    <input
-                      type="text" placeholder="e.g. 120/80"
-                      value={form.bp} onChange={e => setField("bp", e.target.value)}
-                      className={errors.bp ? "error" : ""}
-                    />
-                    {errors.bp && <span className="field-error">{errors.bp}</span>}
-                  </div>
-                  <div className="field">
-                    <label className="field-label">Heart Rate <span style={{ color: "var(--text-muted)", fontWeight: 400, fontSize: "12px" }}>bpm</span></label>
-                    <input
-                      type="number" placeholder="e.g. 72" min="10" max="300"
-                      value={form.hr} onChange={e => setField("hr", e.target.value)}
-                      className={errors.hr ? "error" : ""}
-                    />
-                    {errors.hr && <span className="field-error">{errors.hr}</span>}
-                  </div>
+            {/* Vital Signs — BP + HR only */}
+            <div className="card" style={{ animation: "fadeInUp 0.4s ease 0.14s both" }}>
+              <div className="section-label">Vital Signs <span style={{ textTransform: "none", fontWeight: 400, fontSize: "11px" }}>(optional)</span></div>
+              <div className="form-grid-2">
+                <div className="field">
+                  <label className="field-label">Blood Pressure</label>
+                  <input
+                    type="text" placeholder="e.g. 120/80"
+                    value={form.bp} onChange={e => setField("bp", e.target.value)}
+                    className={errors.bp ? "error" : ""}
+                  />
+                  {errors.bp
+                    ? <span className="field-error">{errors.bp}</span>
+                    : <span className="field-hint">systolic/diastolic mmHg</span>
+                  }
                 </div>
-                <div className="form-grid-3">
-                  <div className="field">
-                    <label className="field-label">SpO₂ <span style={{ color: "var(--text-muted)", fontWeight: 400, fontSize: "12px" }}>%</span></label>
-                    <input
-                      type="number" placeholder="e.g. 98" min="50" max="100" step="0.1"
-                      value={form.spo2} onChange={e => setField("spo2", e.target.value)}
-                      className={errors.spo2 ? "error" : ""}
-                    />
-                    {errors.spo2 && <span className="field-error">{errors.spo2}</span>}
-                  </div>
-                  <div className="field">
-                    <label className="field-label">Temperature <span style={{ color: "var(--text-muted)", fontWeight: 400, fontSize: "12px" }}>°C</span></label>
-                    <input
-                      type="number" placeholder="e.g. 36.6" min="30" max="45" step="0.1"
-                      value={form.temp} onChange={e => setField("temp", e.target.value)}
-                      className={errors.temp ? "error" : ""}
-                    />
-                    {errors.temp && <span className="field-error">{errors.temp}</span>}
-                  </div>
-                  <div className="field">
-                    <label className="field-label">Resp. Rate <span style={{ color: "var(--text-muted)", fontWeight: 400, fontSize: "12px" }}>/min</span></label>
-                    <input
-                      type="number" placeholder="e.g. 16" min="4" max="60"
-                      value={form.rr} onChange={e => setField("rr", e.target.value)}
-                    />
-                  </div>
+                <div className="field">
+                  <label className="field-label">Heart Rate</label>
+                  <input
+                    type="number" placeholder="e.g. 72"
+                    min="10" max="300"
+                    value={form.hr} onChange={e => setField("hr", e.target.value)}
+                    className={errors.hr ? "error" : ""}
+                  />
+                  {errors.hr
+                    ? <span className="field-error">{errors.hr}</span>
+                    : <span className="field-hint">beats per minute</span>
+                  }
                 </div>
               </div>
             </div>
 
             {/* Record date */}
-            <div className="card" style={{ animation: "fadeInUp 0.4s ease 0.2s both" }}>
+            <div className="card" style={{ animation: "fadeInUp 0.4s ease 0.17s both" }}>
               <div className="field">
                 <label className="field-label">Record Last Updated</label>
-                <input type="date" value={form.last_updated} onChange={e => setField("last_updated", e.target.value)} />
+                <input
+                  type="date" value={form.last_updated}
+                  onChange={e => setField("last_updated", e.target.value)}
+                />
                 <span className="field-hint">Used to assess timeliness of the record</span>
               </div>
             </div>
@@ -268,7 +335,12 @@ export default function ValidatePage() {
                   : <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Validate Record</>
                 }
               </button>
-              <button type="button" className="btn btn-secondary" onClick={handleReset}>Reset</button>
+              <button
+                type="button" className="btn btn-secondary"
+                onClick={() => { setForm(EMPTY_FORM); setResult(null); setErrors({}); setApiError(null); }}
+              >
+                Reset
+              </button>
             </div>
           </div>
 
@@ -286,7 +358,7 @@ export default function ValidatePage() {
                 <div className="empty-state">
                   <div className="empty-icon">📋</div>
                   <div className="empty-title">No report yet</div>
-                  <div className="empty-subtitle">Fill in the patient record fields and click Validate Record to receive a quality score with detected issues.</div>
+                  <div className="empty-subtitle">Fill in the patient record and click Validate Record, or use Autofill Test Data to try a sample.</div>
                 </div>
               </div>
             )}

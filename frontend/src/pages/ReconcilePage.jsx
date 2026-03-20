@@ -4,21 +4,44 @@ import SourceCard from "../components/SourceCard";
 import TagInput from "../components/TagInput";
 import MedicationResult from "../components/MedicationResult";
 
-const CONDITION_SUGGESTIONS = [
-  "Type 2 Diabetes", "Type 1 Diabetes", "Hypertension", "Heart Failure",
-  "Atrial Fibrillation", "Chronic Kidney Disease", "COPD", "Asthma",
-  "Hyperlipidemia", "Hypothyroidism", "Depression", "Anxiety", "GERD",
-  "Osteoporosis", "Rheumatoid Arthritis", "Stroke", "CAD",
-];
-
-function makeSource() {
-  return { system: "", medication: "", date: "", dateType: "last_updated", source_reliability: "high" };
+function makeSource(overrides = {}) {
+  return { system: "", medication: "", date: "", dateType: "last_updated", source_reliability: "high", ...overrides };
 }
+
+// ── Autofill datasets ────────────────────────────────────────────
+const TEST_DATASETS = [
+  {
+    label: "Metformin dose conflict (eGFR low)",
+    patient: { age: "67", conditions: ["Type 2 Diabetes", "Hypertension"], egfr: "45" },
+    sources: [
+      makeSource({ system: "Hospital EHR",  medication: "Metformin 1000mg twice daily", date: "2024-10-15", source_reliability: "high" }),
+      makeSource({ system: "Primary Care",  medication: "Metformin 500mg twice daily",  date: "2025-01-20", source_reliability: "high" }),
+      makeSource({ system: "Pharmacy",       medication: "Metformin 1000mg daily",       date: "2025-01-25", dateType: "last_filled", source_reliability: "medium" }),
+    ],
+  },
+  {
+    label: "Aspirin dose discrepancy",
+    patient: { age: "72", conditions: ["Hypertension", "CAD"], egfr: "" },
+    sources: [
+      makeSource({ system: "Hospital EHR",  medication: "Aspirin 325mg daily",   date: "2024-08-10", source_reliability: "high" }),
+      makeSource({ system: "Clinic B",      medication: "Aspirin 81mg daily",    date: "2025-02-01", source_reliability: "high" }),
+      makeSource({ system: "Patient Portal", medication: "Not taking aspirin",   date: "2025-01-15", source_reliability: "low" }),
+    ],
+  },
+  {
+    label: "Lisinopril dose conflict",
+    patient: { age: "55", conditions: ["Hypertension", "Heart Failure"], egfr: "" },
+    sources: [
+      makeSource({ system: "Cardiology",    medication: "Lisinopril 20mg daily", date: "2025-02-10", source_reliability: "high" }),
+      makeSource({ system: "Patient Portal", medication: "Lisinopril 10mg daily", date: "2024-08-01", source_reliability: "low" }),
+      makeSource({ system: "Pharmacy",       medication: "Lisinopril 20mg daily", date: "2025-02-12", dateType: "last_filled", source_reliability: "medium" }),
+    ],
+  },
+];
 
 function buildPayload(patient, sources) {
   const labs = {};
   if (patient.egfr !== "") labs.eGFR = parseFloat(patient.egfr);
-
   return {
     patient_context: {
       age: patient.age ? parseInt(patient.age) : undefined,
@@ -37,16 +60,12 @@ function buildPayload(patient, sources) {
 function validate(patient, sources) {
   const errs = { patient: {}, sources: [] };
   let ok = true;
-
   if (!patient.age || isNaN(parseInt(patient.age)) || parseInt(patient.age) < 0 || parseInt(patient.age) > 130) {
-    errs.patient.age = "Enter a valid age (0–130)";
-    ok = false;
+    errs.patient.age = "Enter a valid age (0–130)"; ok = false;
   }
   if (patient.egfr !== "" && (isNaN(parseFloat(patient.egfr)) || parseFloat(patient.egfr) < 0)) {
-    errs.patient.egfr = "Enter a valid eGFR value";
-    ok = false;
+    errs.patient.egfr = "Enter a valid eGFR value"; ok = false;
   }
-
   const srcErrs = sources.map(s => {
     const e = {};
     if (!s.system.trim()) { e.system = "Required"; ok = false; }
@@ -55,7 +74,6 @@ function validate(patient, sources) {
     return e;
   });
   errs.sources = srcErrs;
-
   return { ok, errs };
 }
 
@@ -66,14 +84,21 @@ export default function ReconcilePage() {
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState(null);
   const [errors, setErrors] = useState({ patient: {}, sources: [] });
+  const [autofillOpen, setAutofillOpen] = useState(false);
 
   function setPatientField(k, v) { setPatient(p => ({ ...p, [k]: v })); }
-
-  function updateSource(i, val) {
-    setSources(prev => prev.map((s, idx) => idx === i ? val : s));
-  }
+  function updateSource(i, val) { setSources(prev => prev.map((s, idx) => idx === i ? val : s)); }
   function addSource() { setSources(prev => [...prev, makeSource()]); }
   function removeSource(i) { setSources(prev => prev.filter((_, idx) => idx !== i)); }
+
+  function applyAutofill(ds) {
+    setPatient(ds.patient);
+    setSources(ds.sources);
+    setResult(null);
+    setErrors({ patient: {}, sources: [] });
+    setApiError(null);
+    setAutofillOpen(false);
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -81,12 +106,10 @@ export default function ReconcilePage() {
     const { ok, errs } = validate(patient, sources);
     setErrors(errs);
     if (!ok) return;
-
     setLoading(true);
     setResult(null);
     try {
-      const payload = buildPayload(patient, sources);
-      const data = await reconcileMedication(payload);
+      const data = await reconcileMedication(buildPayload(patient, sources));
       setResult(data);
       setTimeout(() => {
         document.getElementById("result-anchor")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -101,8 +124,59 @@ export default function ReconcilePage() {
   return (
     <div style={{ animation: "fadeInUp 0.4s ease both" }}>
       <div className="page-header">
-        <h1 className="page-title">Medication Reconciliation</h1>
-        <p className="page-subtitle">Enter conflicting medication records from different EHR systems to find the most clinically accurate answer.</p>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "16px", flexWrap: "wrap" }}>
+          <div>
+            <h1 className="page-title">Medication Reconciliation</h1>
+            <p className="page-subtitle">Enter conflicting medication records from different EHR systems to find the most clinically accurate answer.</p>
+          </div>
+
+          {/* Autofill dropdown */}
+          <div style={{ position: "relative", flexShrink: 0 }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setAutofillOpen(v => !v)}
+              style={{ whiteSpace: "nowrap" }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+              </svg>
+              Autofill Test Data
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
+            {autofillOpen && (
+              <div style={{
+                position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 50,
+                background: "var(--bg)", border: "1.5px solid var(--border)",
+                borderRadius: "var(--radius-sm)", boxShadow: "var(--shadow-lg)",
+                minWidth: "260px", overflow: "hidden",
+                animation: "scaleIn 0.15s ease",
+              }}>
+                {TEST_DATASETS.map((ds, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => applyAutofill(ds)}
+                    style={{
+                      display: "block", width: "100%", padding: "11px 16px",
+                      background: "none", border: "none",
+                      textAlign: "left", fontSize: "13.5px", fontWeight: 500,
+                      color: "var(--text)", cursor: "pointer",
+                      borderBottom: i < TEST_DATASETS.length - 1 ? "1px solid var(--border)" : "none",
+                      transition: "background var(--transition)",
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = "var(--surface)"}
+                    onMouseLeave={e => e.currentTarget.style.background = "none"}
+                  >
+                    {ds.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       <form onSubmit={handleSubmit} noValidate>
@@ -114,7 +188,6 @@ export default function ReconcilePage() {
             {/* Patient Context */}
             <div className="card" style={{ animation: "fadeInUp 0.4s ease 0.05s both" }}>
               <div className="section-label">Patient Context</div>
-
               <div className="card-section">
                 <div className="form-grid-2">
                   <div className="field">
@@ -151,7 +224,6 @@ export default function ReconcilePage() {
                   value={patient.conditions}
                   onChange={v => setPatientField("conditions", v)}
                   placeholder="e.g. Type 2 Diabetes, Hypertension"
-                  suggestions={CONDITION_SUGGESTIONS}
                 />
               </div>
             </div>
@@ -167,13 +239,10 @@ export default function ReconcilePage() {
                   {sources.length} sources
                 </span>
               </div>
-
               <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                 {sources.map((src, i) => (
                   <SourceCard
-                    key={i}
-                    index={i}
-                    source={src}
+                    key={i} index={i} source={src}
                     onChange={v => updateSource(i, v)}
                     onRemove={() => removeSource(i)}
                     canRemove={sources.length > 2}
@@ -189,7 +258,6 @@ export default function ReconcilePage() {
               </div>
             </div>
 
-            {/* Submit */}
             {apiError && (
               <div className="error-banner">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
@@ -197,11 +265,10 @@ export default function ReconcilePage() {
               </div>
             )}
             <button type="submit" className="btn btn-primary" disabled={loading} style={{ width: "100%", padding: "14px", fontSize: "15px" }}>
-              {loading ? (
-                <><span className="spinner" /> Reconciling…</>
-              ) : (
-                <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Reconcile Medications</>
-              )}
+              {loading
+                ? <><span className="spinner" /> Reconciling…</>
+                : <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Reconcile Medications</>
+              }
             </button>
           </div>
 
@@ -219,12 +286,11 @@ export default function ReconcilePage() {
                 <div className="empty-state">
                   <div className="empty-icon">💊</div>
                   <div className="empty-title">No result yet</div>
-                  <div className="empty-subtitle">Fill in the patient details and sources, then click Reconcile Medications to see the AI-powered result.</div>
+                  <div className="empty-subtitle">Fill in patient details and sources, or use Autofill Test Data above to try a pre-loaded scenario.</div>
                 </div>
               </div>
             )}
           </div>
-
         </div>
       </form>
     </div>
